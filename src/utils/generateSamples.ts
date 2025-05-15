@@ -27,7 +27,7 @@ class MockAudioContext {
       length: length,
       sampleRate: sampleRate,
       duration: length / sampleRate,
-      getChannelData: function(channel: number) {
+      getChannelData: function() {
         return new Float32Array(length);
       }
     };
@@ -35,7 +35,7 @@ class MockAudioContext {
 }
 
 // グローバルにAudioContextを定義
-(global as any).AudioContext = MockAudioContext;
+(global as Record<string, unknown>).AudioContext = MockAudioContext;
 
 // サンプルを生成して保存する関数
 async function generateAndSaveSamples() {

@@ -31,7 +31,7 @@ export default function RootLayout({
         <Script
           src="https://unpkg.com/tone/build/Tone.js"
           strategy="beforeInteractive"
-          onError={(e) => {
+          onError={(_) => {
             console.error('Tone.js preload from unpkg failed, trying jsDelivr next');
           }}
         />
@@ -39,7 +39,7 @@ export default function RootLayout({
         <Script
           src="https://cdn.jsdelivr.net/npm/tone/build/Tone.js"
           strategy="beforeInteractive"
-          onError={(e) => {
+          onError={(_) => {
             console.error('Tone.js preload from jsDelivr failed, trying cdnjs next');
           }}
         />
@@ -47,7 +47,7 @@ export default function RootLayout({
         <Script
           src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"
           strategy="beforeInteractive"
-          onError={(e) => {
+          onError={(_) => {
             console.error('All Tone.js CDN preloads failed');
           }}
         />

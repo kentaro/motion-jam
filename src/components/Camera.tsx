@@ -16,8 +16,6 @@ const Camera = ({ onPoseDetected }: CameraProps) => {
     const [detector, setDetector] = useState<poseDetection.PoseDetector | null>(null);
     const [isRunning, setIsRunning] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const requestRef = useRef<number | null>(null);
-    const lastFrameTimeRef = useRef(0);
 
     // GPU メモリ使用量の制限
     useEffect(() => {
@@ -28,8 +26,8 @@ const Camera = ({ onPoseDetected }: CameraProps) => {
                 tf.env().set('WEBGL_DELETE_TEXTURE_THRESHOLD', 0);  // テクスチャを即座に削除
                 tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);     // 16ビット浮動小数点を使用
             }
-        } catch (e) {
-            console.warn('Error setting TF memory limits:', e);
+        } catch (_) {
+            console.warn('Error setting TF memory limits');
         }
     }, []);
 
@@ -157,23 +155,28 @@ const Camera = ({ onPoseDetected }: CameraProps) => {
                         setIsRunning(true);
                         setError(null);
                         startVideoRendering();
-                    } catch (playError: any) {
+                    } catch (playError) {
                         console.error('ビデオの再生に失敗しました:', playError);
-                        setError(`ビデオの再生に失敗しました: ${playError.message || 'Unknown error'}`);
+                        const errorMessage = playError instanceof Error ? playError.message : 'Unknown error';
+                        setError(`ビデオの再生に失敗しました: ${errorMessage}`);
                     }
                 }
-            } catch (error: any) {
+            } catch (error) {
                 console.error('カメラへのアクセスに失敗しました:', error);
 
                 // エラーの種類に応じたメッセージを設定
-                if (error.name === 'NotAllowedError') {
-                    setError('カメラへのアクセスが拒否されました。ブラウザの設定でカメラへのアクセスを許可してください。');
-                } else if (error.name === 'NotFoundError') {
-                    setError('カメラが見つかりません。カメラが接続されているか確認してください。');
-                } else if (error.name === 'NotReadableError') {
-                    setError('カメラにアクセスできません。別のアプリがカメラを使用している可能性があります。');
+                if (error instanceof DOMException) {
+                    if (error.name === 'NotAllowedError') {
+                        setError('カメラへのアクセスが拒否されました。ブラウザの設定でカメラへのアクセスを許可してください。');
+                    } else if (error.name === 'NotFoundError') {
+                        setError('カメラが見つかりません。カメラが接続されているか確認してください。');
+                    } else if (error.name === 'NotReadableError') {
+                        setError('カメラにアクセスできません。別のアプリがカメラを使用している可能性があります。');
+                    } else {
+                        setError(`カメラエラー: ${error.message || '不明なエラーが発生しました'}`);
+                    }
                 } else {
-                    setError(`カメラエラー: ${error.message || '不明なエラーが発生しました'}`);
+                    setError('不明なエラーが発生しました');
                 }
             }
         };
@@ -239,7 +242,8 @@ const Camera = ({ onPoseDetected }: CameraProps) => {
             }
 
             if (videoRef.current && videoRef.current.srcObject) {
-                const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
+                const stream = videoRef.current.srcObject as MediaStream;
+                const tracks = stream.getTracks();
                 tracks.forEach(track => track.stop());
                 videoRef.current.srcObject = null;
             }

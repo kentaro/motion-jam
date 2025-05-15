@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { Pose } from '@tensorflow-models/pose-detection';
+import type { Pose, Keypoint } from '@tensorflow-models/pose-detection';
 
 interface AudioEngineProps {
     pose: Pose | null;
@@ -18,44 +18,71 @@ interface SoundEvent {
 // グローバル型拡張（Window型にToneを追加）
 declare global {
     interface Window {
-        Tone?: any;
+        Tone?: Record<string, unknown>;
     }
 }
 
 // Tone.jsの型定義
 interface ToneType {
-    Synth: any;
-    MembraneSynth: any;
-    NoiseSynth: any;
-    MetalSynth: any;
-    MonoSynth: any;
-    Part: any;
-    Transport: any;
+    Synth: new (options?: unknown) => ToneSynth;
+    MembraneSynth: new (options?: unknown) => ToneSynth;
+    NoiseSynth: new (options?: unknown) => ToneSynth;
+    MetalSynth: new (options?: unknown) => ToneSynth;
+    MonoSynth: new (options?: unknown) => ToneSynth;
+    Part: new (callback: (time: number, value: unknown) => void, events: unknown[]) => TonePart;
+    Transport: ToneTransport;
     start: () => Promise<void>;
-    context: any;
+    context: {
+        resume: () => Promise<void>;
+        close: () => Promise<void>;
+    };
     version: string;
-    [key: string]: any;
+    [key: string]: unknown;
+}
+
+// Toneのコンポーネント型
+interface ToneSynth {
+    toDestination: () => ToneSynth;
+    triggerAttackRelease: (note: string, duration: string | number, time?: number, velocity?: number) => void;
+    dispose: () => void;
+    volume: { value: number };
+}
+
+// Toneのパート型
+interface TonePart {
+    start: (time?: number) => void;
+    stop: (time?: number) => void;
+    dispose: () => void;
+}
+
+// Toneのトランスポート型
+interface ToneTransport {
+    bpm: { value: number };
+    start: (time?: number) => void;
+    stop: (time?: number) => void;
+    seconds: number;
+    schedule: (callback: (time: number) => void, time: number) => number;
+    clear: (id: number) => void;
 }
 
 const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
-    const [bpm, setBpm] = useState(120);
     const [isInitialized, setIsInitialized] = useState(false);
     // ToneJSインスタンス
     const ToneRef = useRef<ToneType | null>(null);
 
     // Tone.jsインスタンスの参照
     const drumsRef = useRef<{
-        kick: any | null;
-        snare: any | null;
-        hihat: any | null;
+        kick: ToneSynth | null;
+        snare: ToneSynth | null;
+        hihat: ToneSynth | null;
     }>({
         kick: null,
         snare: null,
         hihat: null
     });
-    const bassRef = useRef<any | null>(null);
-    const melodyRef = useRef<any | null>(null);
-    const fxRef = useRef<any | null>(null);
+    const bassRef = useRef<ToneSynth | null>(null);
+    const melodyRef = useRef<ToneSynth | null>(null);
+    const fxRef = useRef<ToneSynth | null>(null);
 
     // 姿勢データの状態を管理
     const poseStateRef = useRef({
@@ -98,6 +125,9 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
         melodyCooldown: 0,
         fxCooldown: 0,
     });
+
+    // デフォルトBPM値（実際には使用されていないが、Tone.js初期化用）
+    const defaultBpm = 120;
 
     // Tone.jsの初期化
     useEffect(() => {
@@ -510,7 +540,7 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
                 ToneRef.current.Transport.cancel();
             }
         };
-    }, [bpm]);
+    }, []);
 
     // 再生状態の制御
     useEffect(() => {
@@ -524,10 +554,9 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
                     // Audio Contextを開始 (ユーザーインタラクション必須)
                     await Tone.start();
 
-                    // BPMの設定
-                    Tone.Transport.bpm.value = bpm;
-
                     // Tone.Transportを開始（タイムベースの処理用）
+                    // 注：BPMは使用されていないが、デフォルト値を設定
+                    Tone.Transport.bpm.value = defaultBpm;
                     Tone.Transport.start();
 
                     console.log('音声エンジン準備完了 - ポーズによる音声生成を開始します');
@@ -549,7 +578,7 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
                 Tone.Transport.stop();
             }
         };
-    }, [isPlaying, isInitialized, bpm]);
+    }, [isPlaying, isInitialized, defaultBpm]);
 
     // ポーズデータの処理とそれに基づいた音の生成
     useEffect(() => {
@@ -750,14 +779,35 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
                     if (fxRef.current) {
                         try {
                             // 周波数が上昇する「びょいーん」効果
+                            // まず現在のdetuneを保存して0にリセット
+                            const currentDetune = fxRef.current.detune.value;
+                            fxRef.current.detune.value = 0;
+
+                            // 音を鳴らす
                             fxRef.current.triggerAttackRelease('C4', '4n', now + 0.05, 0.6);
-                            // 音の持続時間中にピッチを上げる
-                            fxRef.current.detune.rampTo(1200, 0.4); // 1オクターブ上げる
-                            setTimeout(() => {
-                                if (fxRef.current) {
-                                    fxRef.current.detune.value = 0; // デチューンをリセット
-                                }
-                            }, 500);
+
+                            // 少し遅延させてからdetune操作（スケジューリング競合を回避）
+                            const rampStartTime = now + 0.1;
+                            // Toneの名前空間が必要なので、ToneRef.currentを使う
+                            if (ToneRef.current) {
+                                fxRef.current.detune.linearRampToValueAtTime(1200, rampStartTime + 0.4);
+
+                                // タイムアウトでリセット（Tone.jsのスケジューリングに影響しない方法）
+                                setTimeout(() => {
+                                    if (fxRef.current && ToneRef.current) {
+                                        fxRef.current.detune.cancelScheduledValues(ToneRef.current.now());
+                                        fxRef.current.detune.value = 0;
+                                    }
+                                }, 600);
+                            } else {
+                                // Toneが利用できない場合は単純に音だけ鳴らす
+                                setTimeout(() => {
+                                    if (fxRef.current) {
+                                        fxRef.current.detune.value = 0;
+                                    }
+                                }, 600);
+                            }
+
                             soundPlayedThisFrame = true;
                         } catch (error) {
                             console.error('FXサウンド再生エラー:', error);
@@ -825,7 +875,7 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
         };
 
         // シンプルなパンチ動作検出関数（閾値を下げて検出しやすく）
-        const detectSimplePunch = (keypoints: any[], prevKeypoints?: any[]) => {
+        const detectSimplePunch = (keypoints: Keypoint[], prevKeypoints?: Keypoint[]) => {
             if (!prevKeypoints) return false;
 
             // 右手と左手の位置を取得
@@ -1231,28 +1281,7 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
     return (
         <div className="p-4 bg-gray-100 rounded-lg mt-4">
             <h3 className="text-lg font-semibold mb-2">音楽エンジン</h3>
-            <div className="grid grid-cols-2 gap-2">
-                <div>
-                    <p className="text-sm">BPM: {bpm}</p>
-                    <input
-                        type="range"
-                        min="80"
-                        max="160"
-                        value={bpm}
-                        onChange={(e) => {
-                            const newBpm = parseInt(e.target.value);
-                            setBpm(newBpm);
-                            if (ToneRef.current) {
-                                try {
-                                    ToneRef.current.Transport.bpm.value = newBpm;
-                                } catch (error) {
-                                    console.error('BPM変更に失敗しました:', error);
-                                }
-                            }
-                        }}
-                        className="w-full"
-                    />
-                </div>
+            <div className="grid grid-cols-1 gap-2">
                 <div className="text-sm">
                     <p>ステータス: {isPlaying ? '認識中' : '停止'}</p>
                     <p>初期化: {isInitialized ? '完了' : '準備中...'}</p>
@@ -1269,6 +1298,17 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
                     <li>左手を上げる：FXサウンド</li>
                     <li>両手を上げる：特殊エフェクト</li>
                 </ul>
+                <div className="mt-2">
+                    <p>【デモ動画】</p>
+                    <a
+                        href="https://youtu.be/_G3XRMXgDcw"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-500 hover:underline"
+                    >
+                        YouTubeでデモを見る
+                    </a>
+                </div>
             </div>
         </div>
     );

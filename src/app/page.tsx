@@ -58,18 +58,22 @@ export default function Home() {
 
       setCameraEnabled(true);
       setCameraError(null);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('カメラへのアクセスに失敗しました:', error);
 
       // エラーメッセージを設定
-      if (error.name === 'NotAllowedError') {
-        setCameraError('カメラへのアクセスが拒否されました。ブラウザの設定でカメラへのアクセスを許可してください。');
-      } else if (error.name === 'NotFoundError') {
-        setCameraError('カメラが見つかりません。カメラが接続されているか確認してください。');
-      } else if (error.name === 'NotReadableError') {
-        setCameraError('カメラにアクセスできません。別のアプリがカメラを使用している可能性があります。');
+      if (error instanceof DOMException) {
+        if (error.name === 'NotAllowedError') {
+          setCameraError('カメラへのアクセスが拒否されました。ブラウザの設定でカメラへのアクセスを許可してください。');
+        } else if (error.name === 'NotFoundError') {
+          setCameraError('カメラが見つかりません。カメラが接続されているか確認してください。');
+        } else if (error.name === 'NotReadableError') {
+          setCameraError('カメラにアクセスできません。別のアプリがカメラを使用している可能性があります。');
+        } else {
+          setCameraError(`カメラエラー: ${error.message || '不明なエラーが発生しました'}`);
+        }
       } else {
-        setCameraError(`カメラエラー: ${error.message || '不明なエラーが発生しました'}`);
+        setCameraError('不明なエラーが発生しました');
       }
     }
   };
@@ -111,7 +115,7 @@ export default function Home() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isPlaying]);
+  }, [isPlaying, togglePlayback]);
 
   return (
     <main className="min-h-screen p-4 md:p-8 flex flex-col">
