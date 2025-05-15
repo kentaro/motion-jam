@@ -1,92 +1,95 @@
-# MotionJam
+# Motion Jam - 動きで音楽を作るインタラクティブアプリ
 
-動きで音楽を作るインタラクティブWebアプリケーション。カメラを通して骨格を検出し、動作に応じて音楽を生成・制御します。
+MotionJamは体の動きを使って音楽を生成できるインタラクティブなWebアプリです。カメラで撮影した動きをTensorFlow.jsとPose Detectionモデルで解析し、それに合わせて音楽を生成します。
 
-## 概要
+## デモ
 
-MotionJamはWebカメラを使って人の動きを検出し、リアルタイムで音楽を生成します。TensorFlow.jsのMoveNetモデルで骨格を検出し、Tone.jsで音楽を生成しています。
+YouTubeでデモを見る: [MotionJam Demo](https://youtu.be/_G3XRMXgDcw)
 
-## 機能
+## 特徴
 
-- カメラからの骨格検出（MoveNet）
-- 動きに反応する音楽生成（Tone.js）
-- マルチパート構成（ドラム、ベース、メロディ）
-- モーションマッピング（特定の動きで音楽を制御）
+- ブラウザ上で完全に動作（サーバー不要）
+- TensorFlow.jsとPose Detectionを使った動き検出
+- Tone.jsによるリアルタイム音楽生成
+- 以下の動作で音楽を制御:
+  - 頷く動作：キックドラム
+  - 右手を動かす：ハイハット
+  - 左手を動かす：スネア
+  - 頭を左右に振る：メロディフレーズ
+  - 右手を上げる：ベース音
+  - 左手を上げる：FXサウンド
+  - 両手を上げる：特殊エフェクト
 
-## モーションマッピング
-
-以下の動きで音楽を制御できます：
-
-- 両手を頭の上に上げる: ドロップ発動（ドラム強化）
-- 右手を速く振る: メロディの音程上昇
-- 左手を円形に動かす: フィルターエフェクト開始
-- 頭を左右に振る: パンを動的に変更
-- しゃがむ: ベースのパターン切り替え
-- 静止状態が5秒続く: 曲をフェードアウト
-
-## 開発環境
-
-- Next.js
-- TensorFlow.js + MoveNet
-- Tone.js
-- TypeScript
-
-## 必要なファイル
-
-音源サンプルが必要です：
-
-- `/public/samples/kick.wav` - キックドラム
-- `/public/samples/snare.wav` - スネアドラム
-- `/public/samples/hihat.wav` - ハイハット
-
-## インストール
+## 開発方法
 
 ```bash
-# インストール
+# 依存パッケージのインストール
 npm install
 
-# 開発サーバー起動
+# 開発サーバーの起動
 npm run dev
 
-# ビルド（静的ファイル生成）
+# 本番ビルド
 npm run build
 ```
 
-## GitHub Pagesへのデプロイ
+## GitHub Pagesへのデプロイ方法
 
-このプロジェクトはGitHub Actionsを使用して、GitHub Pagesに自動的にデプロイできます。
+このプロジェクトは静的サイトとして出力され、GitHub Pagesで簡単にホストできます。
 
-1. GitHubリポジトリの「Settings」タブに移動
-2. 左サイドバーの「Pages」を選択
-3. 「Source」セクションで「GitHub Actions」を選択
-4. mainブランチにプッシュするか、GitHub Actionsのワークフローを手動で実行
+### 手動デプロイ
 
-ワークフローは`.github/workflows/deploy.yml`に定義されています。
+1. `npm run build` を実行して静的ファイルを生成
+2. `out` ディレクトリの内容をGitHubリポジトリの `gh-pages` ブランチにプッシュ
+3. リポジトリの設定でGitHub Pagesのソースを `gh-pages` ブランチに設定
 
-### ベースパスの設定
+### GitHub Actionsによる自動デプロイ
 
-リポジトリ名が`motion-jam`でない場合は、`next.config.ts`ファイルの`basePath`を変更してください：
+以下のようなワークフローファイルを `.github/workflows/deploy.yml` に追加すると、メインブランチへのプッシュ時に自動的にデプロイされます：
 
-```javascript
-basePath: process.env.NODE_ENV === 'production' ? '/あなたのリポジトリ名' : '',
+```yaml
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: out
+          branch: gh-pages
 ```
 
-## 使い方
+## 技術スタック
 
-1. カメラへのアクセスを許可する
-2. 「開始」ボタンをクリックするか、スペースキーを押す
-3. カメラの前で動いて音楽を制御する
-4. 「停止」ボタンをクリックするか、再度スペースキーを押して停止
-
-## 注意事項
-
-- カメラの使用は初回時に明示的な許可が必要です
-- すべての処理はクライアントサイドで完結します（個人情報は送信されません）
-- 処理性能により、古いスマホやPCでは低パフォーマンスになる可能性があります
+- Next.js - Reactフレームワーク
+- TensorFlow.js - 機械学習ライブラリ
+- Pose Detection - 姿勢推定モデル
+- Tone.js - Webオーディオフレームワーク
+- TypeScript - 型付きJavaScript
 
 ## ライセンス
 
-MIT
+MITライセンス
 
 ## 作者
 
