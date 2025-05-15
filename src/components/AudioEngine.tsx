@@ -18,7 +18,7 @@ interface SoundEvent {
 // グローバル型拡張（Window型にToneを追加）
 declare global {
     interface Window {
-        Tone?: Record<string, unknown>;
+        Tone?: ToneType;
     }
 }
 
@@ -29,6 +29,8 @@ interface ToneType {
     NoiseSynth: new (options?: unknown) => ToneSynth;
     MetalSynth: new (options?: unknown) => ToneSynth;
     MonoSynth: new (options?: unknown) => ToneSynth;
+    FMSynth: new (options?: unknown) => ToneSynth;
+    AutoFilter: new (options?: unknown) => ToneAutoFilter;
     Part: new (callback: (time: number, value: unknown) => void, events: unknown[]) => TonePart;
     Transport: ToneTransport;
     start: () => Promise<void>;
@@ -37,6 +39,7 @@ interface ToneType {
         close: () => Promise<void>;
     };
     version: string;
+    now: () => number;
     [key: string]: unknown;
 }
 
@@ -46,6 +49,19 @@ interface ToneSynth {
     triggerAttackRelease: (note: string, duration: string | number, time?: number, velocity?: number) => void;
     dispose: () => void;
     volume: { value: number };
+    connect: (node: unknown) => ToneSynth;
+    detune: {
+        value: number;
+        linearRampToValueAtTime: (value: number, time: number) => void;
+        cancelScheduledValues: (time: number) => void;
+    };
+}
+
+// AutoFilter型の定義
+interface ToneAutoFilter {
+    toDestination: () => ToneAutoFilter;
+    start: () => ToneAutoFilter;
+    dispose: () => void;
 }
 
 // Toneのパート型
@@ -63,6 +79,7 @@ interface ToneTransport {
     seconds: number;
     schedule: (callback: (time: number) => void, time: number) => number;
     clear: (id: number) => void;
+    cancel: () => void;
 }
 
 const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
@@ -1085,7 +1102,7 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
             case 3: // 複雑な不規則パターン
                 {
                     // 完全にランダムな跳躍（最も激しい）
-                    const steps = [];
+                    const steps: number[] = [];
                     for (let i = 0; i < phraseLength; i++) {
                         // 大きなランダム跳躍を作る
                         steps.push(Math.floor(Math.random() * notes.length));
@@ -1096,7 +1113,7 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
             case 4: // 反復と突然の変化
                 {
                     // 同じ音を繰り返した後で急に大きく跳躍するパターン
-                    const pattern = [];
+                    const pattern: number[] = [];
                     const noteIdx = Math.floor(Math.random() * notes.length);
                     // 同じ音を数回繰り返す
                     for (let i = 0; i < Math.min(3, Math.floor(phraseLength / 2)); i++) {
@@ -1265,7 +1282,9 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
             // 音符を鳴らす
             try {
                 // 大きな値でクリップするのを防ぐ
-                melodyRef.current.triggerAttackRelease(note, duration, noteTime, Math.min(0.95, Math.max(0.3, velocity)));
+                if (melodyRef.current) {
+                    melodyRef.current.triggerAttackRelease(note, duration, noteTime, Math.min(0.95, Math.max(0.3, velocity)));
+                }
             } catch (error) {
                 console.error(`音符再生エラー (${note}, ${duration}):`, error);
             }
