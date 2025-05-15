@@ -17,6 +17,20 @@ const Camera = ({ onPoseDetected }: CameraProps) => {
     const [isRunning, setIsRunning] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
+    // openBrowserSettings関数をコンポーネント内に定義
+    const openBrowserSettings = () => {
+        if (navigator.userAgent.indexOf("Chrome") !== -1) {
+            window.open('chrome://settings/content/camera');
+        } else if (navigator.userAgent.indexOf("Firefox") !== -1) {
+            window.open('about:preferences#privacy');
+        } else if (navigator.userAgent.indexOf("Safari") !== -1) {
+            // Safariの場合は直接設定を開けないためアラートで案内
+            alert('Safari の場合: 設定アプリ > Safari > Webサイトの設定 > カメラ で、このサイトのカメラアクセスを許可してください。');
+        } else {
+            alert('お使いのブラウザのカメラ設定を確認し、アクセスを許可してください。');
+        }
+    };
+
     // GPU メモリ使用量の制限
     useEffect(() => {
         try {
@@ -435,6 +449,7 @@ const Camera = ({ onPoseDetected }: CameraProps) => {
                     >
                         再試行
                     </button>
+                    {error.includes('拒否されました') && <button onClick={openBrowserSettings}>設定を開く</button>}
                 </div>
             ) : (
                 <div className="relative">

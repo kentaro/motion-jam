@@ -1,4 +1,6 @@
 // @ts-check
+import { createRequire } from 'module'; // createRequire をインポート
+const require = createRequire(import.meta.url); // require 関数を作成
 
 /**
  * @type {import('next').NextConfig}
@@ -16,7 +18,7 @@ const nextConfig = {
     basePath: process.env.NODE_ENV === 'production' ? '/motion-jam' : '',
 
     // Tone.jsをトランスパイル対象に追加
-    transpilePackages: ['tone'],
+    // transpilePackages: ['tone'],
 
     // ビルド時の型チェックを無効化（プロダクションビルドでのエラーを回避）
     typescript: {
@@ -28,7 +30,7 @@ const nextConfig = {
         ignoreDuringBuilds: true,
     },
 
-    webpack: (config, { isServer }) => {
+    webpack: (config, { isServer, webpack: Webpack }) => {
         // TensorFlow.jsのブラウザフラグを設定
         config.resolve.fallback = {
             ...config.resolve.fallback,
@@ -52,20 +54,16 @@ const nextConfig = {
                 asyncWebAssembly: true,
             };
 
-            // Tone.js用の追加設定
-            config.module.rules.push({
-                test: /node_modules\/tone\/.*\.js$/,
-                use: {
-                    loader: 'babel-loader',
-                    options: {
-                        presets: ['@babel/preset-env'],
-                        plugins: [
-                            '@babel/plugin-transform-runtime',
-                            '@babel/plugin-proposal-class-properties'
-                        ]
-                    }
-                }
-            });
+            // Buffer polyfill (もし 'Buffer is not defined' エラーが出る場合)
+            config.plugins.push(
+                new Webpack.ProvidePlugin({
+                    Buffer: ['buffer', 'Buffer'],
+                })
+            );
+            config.resolve.fallback = {
+                ...config.resolve.fallback,
+                "buffer": require.resolve("buffer/")
+            };
         }
 
         return config;

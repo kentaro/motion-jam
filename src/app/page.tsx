@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 // 動的インポートに変更
-const Camera = dynamic(() => import('@/components/Camera').then(mod => ({ default: mod.Camera })), { ssr: false });
-const AudioEngine = dynamic(() => import('@/components/AudioEngine').then(mod => ({ default: mod.AudioEngine })), { ssr: false });
+const Camera = dynamic(() => import('@/components/Camera'), { ssr: false });
+const AudioEngine = dynamic(() => import('@/components/AudioEngine'), { ssr: false });
 // 型だけをインポート
 import type { Pose } from '@tensorflow-models/pose-detection';
 
@@ -13,8 +13,6 @@ export default function Home() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isTfLoaded, setIsTfLoaded] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
-  const [cameraComponentReady, setCameraComponentReady] = useState(false);
 
   // TensorFlowの読み込み状態を管理
   useEffect(() => {
@@ -26,12 +24,6 @@ export default function Home() {
         const tf = await import('@tensorflow/tfjs');
         await tf.ready();
         setIsTfLoaded(true);
-
-        // TensorFlowの読み込みが完了したらコンポーネント表示準備を整える
-        // 少し遅延させることでDOMレンダリングの問題を回避
-        setTimeout(() => {
-          setCameraComponentReady(true);
-        }, 500);
       } catch (error) {
         console.error('TensorFlow.jsの読み込みに失敗しました:', error);
       }
@@ -40,55 +32,9 @@ export default function Home() {
     loadTf();
   }, []);
 
-  // カメラへのアクセスを要求する関数
-  const requestCameraAccess = async () => {
-    try {
-      // 明示的にカメラへのアクセスを要求
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 640, max: 1280 },
-          height: { ideal: 480, max: 720 },
-          facingMode: 'user',
-        },
-        audio: false
-      });
-
-      // 権限が付与されたらすぐにストリームを停止
-      stream.getTracks().forEach(track => track.stop());
-
-      setCameraEnabled(true);
-      setCameraError(null);
-    } catch (error: unknown) {
-      console.error('カメラへのアクセスに失敗しました:', error);
-
-      // エラーメッセージを設定
-      if (error instanceof DOMException) {
-        if (error.name === 'NotAllowedError') {
-          setCameraError('カメラへのアクセスが拒否されました。ブラウザの設定でカメラへのアクセスを許可してください。');
-        } else if (error.name === 'NotFoundError') {
-          setCameraError('カメラが見つかりません。カメラが接続されているか確認してください。');
-        } else if (error.name === 'NotReadableError') {
-          setCameraError('カメラにアクセスできません。別のアプリがカメラを使用している可能性があります。');
-        } else {
-          setCameraError(`カメラエラー: ${error.message || '不明なエラーが発生しました'}`);
-        }
-      } else {
-        setCameraError('不明なエラーが発生しました');
-      }
-    }
-  };
-
-  // ブラウザの権限設定を開く
-  const openBrowserSettings = () => {
-    if (navigator.userAgent.indexOf("Chrome") !== -1) {
-      window.open('chrome://settings/content/camera');
-    } else if (navigator.userAgent.indexOf("Firefox") !== -1) {
-      window.open('about:preferences#privacy');
-    } else if (navigator.userAgent.indexOf("Safari") !== -1) {
-      alert('Safari -> 設定 -> Webサイト設定からカメラの権限を許可してください');
-    } else {
-      alert('お使いのブラウザの設定でカメラアクセスを許可してください');
-    }
+  // カメラコンポーネントの表示をユーザーに許可させるための関数
+  const handleEnableCameraClick = () => {
+    setCameraEnabled(true);
   };
 
   // ポーズ検出時の処理
@@ -98,7 +44,7 @@ export default function Home() {
 
   // 再生・停止の制御
   const togglePlayback = () => {
-    setIsPlaying(!isPlaying);
+    setIsPlaying(prevIsPlaying => !prevIsPlaying);
   };
 
   // キーボードのスペースキーで再生/停止
@@ -106,7 +52,7 @@ export default function Home() {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.code === 'Space') {
         event.preventDefault();
-        togglePlayback();
+        setIsPlaying(prevIsPlaying => !prevIsPlaying);
       }
     };
 
@@ -115,7 +61,7 @@ export default function Home() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isPlaying, togglePlayback]);
+  }, [setIsPlaying]);
 
   return (
     <main className="min-h-screen p-4 md:p-8 flex flex-col">
@@ -132,22 +78,9 @@ export default function Home() {
                 <h3 className="text-lg font-semibold mb-3">カメラアクセスが必要です</h3>
                 <p className="mb-4">このアプリはカメラを使用して動きを検出します。「カメラを有効にする」ボタンをクリックして、カメラへのアクセスを許可してください。</p>
 
-                {cameraError && (
-                  <div className="bg-red-100 border border-red-400 text-red-700 p-3 mb-4 rounded">
-                    <p className="font-bold">エラー</p>
-                    <p className="text-sm">{cameraError}</p>
-                    <button
-                      onClick={openBrowserSettings}
-                      className="mt-2 text-xs bg-red-500 hover:bg-red-700 text-white py-1 px-2 rounded"
-                    >
-                      ブラウザ設定を開く
-                    </button>
-                  </div>
-                )}
-
                 <button
                   className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg"
-                  onClick={requestCameraAccess}
+                  onClick={handleEnableCameraClick}
                 >
                   カメラを有効にする
                 </button>
@@ -159,7 +92,7 @@ export default function Home() {
                   <p className="text-gray-600 text-sm">※初回ロード時はモデルのダウンロードに時間がかかることがあります</p>
                 </div>
 
-                {cameraComponentReady && (
+                {isTfLoaded && cameraEnabled && (
                   <Camera onPoseDetected={handlePoseDetected} />
                 )}
 
@@ -170,7 +103,7 @@ export default function Home() {
                       : 'bg-green-500 hover:bg-green-600'
                       }`}
                     onClick={togglePlayback}
-                    disabled={!cameraComponentReady}
+                    disabled={!isTfLoaded || !cameraEnabled}
                   >
                     {isPlaying ? '停止' : '開始'}
                   </button>

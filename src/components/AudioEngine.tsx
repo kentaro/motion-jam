@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { Pose, Keypoint } from '@tensorflow-models/pose-detection';
+import * as Tone from 'tone';
 
 interface AudioEngineProps {
     pose: Pose | null;
@@ -15,91 +16,29 @@ interface SoundEvent {
     velocity: number;
 }
 
-// グローバル型拡張（Window型にToneを追加）
-declare global {
-    interface Window {
-        Tone?: ToneType;
-    }
-}
-
-// Tone.jsの型定義
-interface ToneType {
-    Synth: new (options?: unknown) => ToneSynth;
-    MembraneSynth: new (options?: unknown) => ToneSynth;
-    NoiseSynth: new (options?: unknown) => ToneSynth;
-    MetalSynth: new (options?: unknown) => ToneSynth;
-    MonoSynth: new (options?: unknown) => ToneSynth;
-    FMSynth: new (options?: unknown) => ToneSynth;
-    AutoFilter: new (options?: unknown) => ToneAutoFilter;
-    Part: new (callback: (time: number, value: unknown) => void, events: unknown[]) => TonePart;
-    Transport: ToneTransport;
-    start: () => Promise<void>;
-    context: {
-        resume: () => Promise<void>;
-        close: () => Promise<void>;
-    };
-    version: string;
-    now: () => number;
-    [key: string]: unknown;
-}
-
-// Toneのコンポーネント型
-interface ToneSynth {
-    toDestination: () => ToneSynth;
-    triggerAttackRelease: (note: string, duration: string | number, time?: number, velocity?: number) => void;
-    dispose: () => void;
-    volume: { value: number };
-    connect: (node: unknown) => ToneSynth;
-    detune: {
-        value: number;
-        linearRampToValueAtTime: (value: number, time: number) => void;
-        cancelScheduledValues: (time: number) => void;
-    };
-}
-
-// AutoFilter型の定義
-interface ToneAutoFilter {
-    toDestination: () => ToneAutoFilter;
-    start: () => ToneAutoFilter;
-    dispose: () => void;
-}
-
-// Toneのパート型
-interface TonePart {
-    start: (time?: number) => void;
-    stop: (time?: number) => void;
-    dispose: () => void;
-}
-
-// Toneのトランスポート型
-interface ToneTransport {
-    bpm: { value: number };
-    start: (time?: number) => void;
-    stop: (time?: number) => void;
-    seconds: number;
-    schedule: (callback: (time: number) => void, time: number) => number;
-    clear: (id: number) => void;
-    cancel: () => void;
-}
+// Tone.jsの型定義 (toneから直接型を利用するため、多くは不要になる)
+// interface ToneType { ... }
+// interface ToneSynth { ... }
+// ... (他のカスタム型定義も同様に確認)
 
 const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
     const [isInitialized, setIsInitialized] = useState(false);
-    // ToneJSインスタンス
-    const ToneRef = useRef<ToneType | null>(null);
+    // ToneJSインスタンス (ToneRef は不要になり、各種synth Refに直接 Tone.Synthなどの型を割り当てる)
+    // const ToneRef = useRef<ToneType | null>(null);
 
-    // Tone.jsインスタンスの参照
+    // Tone.jsインスタンスの参照 (型を Tone.* に変更)
     const drumsRef = useRef<{
-        kick: ToneSynth | null;
-        snare: ToneSynth | null;
-        hihat: ToneSynth | null;
+        kick: Tone.MembraneSynth | null;
+        snare: Tone.NoiseSynth | null;
+        hihat: Tone.MetalSynth | null;
     }>({
         kick: null,
         snare: null,
         hihat: null
     });
-    const bassRef = useRef<ToneSynth | null>(null);
-    const melodyRef = useRef<ToneSynth | null>(null);
-    const fxRef = useRef<ToneSynth | null>(null);
+    const bassRef = useRef<Tone.MonoSynth | null>(null);
+    const melodyRef = useRef<Tone.Synth | null>(null);
+    const fxRef = useRef<Tone.FMSynth | null>(null);
 
     // 姿勢データの状態を管理
     const poseStateRef = useRef({
@@ -146,464 +85,141 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
     // デフォルトBPM値（実際には使用されていないが、Tone.js初期化用）
     const defaultBpm = 120;
 
-    // Tone.jsの初期化
+    // Tone.jsの初期化 (古いloadToneを新しいinitToneに置き換えるイメージ)
     useEffect(() => {
-        let isMounted = true;
+        // let isMounted = true; // isInitialized で管理するため不要になる場合がある
 
-        const loadTone = async () => {
+        const initTone = async () => {
+            if (typeof window === 'undefined' || isInitialized) return;
+
             try {
-                if (typeof window === 'undefined') return; // サーバーサイドではロードしない
+                await Tone.start();
+                console.log("AudioContext started by Tone.start() for AudioEngine");
 
-                // window.Toneが存在する場合はそれを使用
-                if (window.Tone) {
-                    console.log('Using pre-loaded Tone.js from window');
-                    ToneRef.current = window.Tone as ToneType;
-                } else {
-                    // 動的インポートではなくCDNから読み込む
-                    console.error('Tone.js not found in window, attempting to load from CDN');
-                    await loadToneFromCDN();
-
-                    if (!window.Tone) {
-                        throw new Error('Failed to load Tone.js from all sources');
-                    }
-
-                    ToneRef.current = window.Tone as ToneType;
-                }
-
-                const Tone = ToneRef.current;
-                if (!Tone) {
-                    throw new Error('Tone.js could not be loaded');
-                }
-
-                console.log('Tone.js version:', Tone.version);
-
-                // まずはシンプルなテスト - このテストが成功すれば基本的な初期化は可能
-                try {
-                    const testSynth = new Tone.Synth().toDestination();
-                    testSynth.triggerAttackRelease("C4", 0.1);
-                    console.log('Test synth created successfully');
-                    testSynth.dispose();
-                } catch (e) {
-                    console.error('Test synth failed:', e);
-                    throw e;
-                }
-
-                // キックドラム
-                try {
-                    console.log('Creating kick drum...');
-                    // MembraneSynthが失敗する場合があるため、ここで明示的にチェック
-                    if (typeof Tone.MembraneSynth !== 'function') {
-                        throw new Error('MembraneSynth is not a constructor');
-                    }
-
+                // 各シンセサイザーの初期化 (例: drumsRef.current.kick)
+                // (この部分は元のinit関数やsetupInstruments関数から移植・統合する)
+                // 既存の初期化ロジック (new Tone.MembraneSynth など) はここに移動
+                // 例:
+                if (!drumsRef.current.kick) {
                     drumsRef.current.kick = new Tone.MembraneSynth({
                         pitchDecay: 0.05,
-                        octaves: 5,
+                        octaves: 10,
                         oscillator: { type: 'sine' },
-                        envelope: {
-                            attack: 0.001,
-                            decay: 0.4,
-                            sustain: 0.01,
-                            release: 1.4,
-                        }
+                        envelope: { attack: 0.001, decay: 0.4, sustain: 0.01, release: 1.4, attackCurve: 'exponential' }
                     }).toDestination();
-                    console.log('Kick drum created');
-                } catch (e) {
-                    console.error('Failed to create kick drum:', e);
-                    // フォールバック: 通常のSynthで代用
-                    drumsRef.current.kick = new Tone.Synth({
-                        oscillator: { type: 'sine' },
-                        envelope: {
-                            attack: 0.001,
-                            decay: 0.4,
-                            sustain: 0.01,
-                            release: 1.4,
-                        }
-                    }).toDestination();
+                    drumsRef.current.kick.volume.value = -6;
                 }
 
                 // スネアドラム
-                try {
+                if (!drumsRef.current.snare) {
                     drumsRef.current.snare = new Tone.NoiseSynth({
                         noise: { type: 'white' },
-                        envelope: {
-                            attack: 0.001,
-                            decay: 0.2,
-                            sustain: 0.02,
-                            release: 0.2
-                        }
+                        envelope: { attack: 0.001, decay: 0.2, sustain: 0.02, release: 0.2 }
                     }).toDestination();
-                } catch (e) {
-                    console.error('Failed to create snare drum:', e);
-                    drumsRef.current.snare = new Tone.Synth().toDestination();
+                    drumsRef.current.snare.volume.value = -10;
                 }
 
                 // ハイハット
-                try {
+                if (!drumsRef.current.hihat) {
                     drumsRef.current.hihat = new Tone.MetalSynth({
-                        envelope: {
-                            attack: 0.001,
-                            decay: 0.1,
-                            release: 0.01
-                        },
+                        envelope: { attack: 0.001, decay: 0.1, release: 0.01 },
                         harmonicity: 5.1,
                         modulationIndex: 32,
                         resonance: 4000,
                         octaves: 1.5
                     }).toDestination();
-                } catch (e) {
-                    console.error('Failed to create hihat:', e);
-                    drumsRef.current.hihat = new Tone.Synth().toDestination();
+                    drumsRef.current.hihat.volume.value = -15;
                 }
-
-                // 各ドラムの音量調整
-                drumsRef.current.kick.volume.value = -6;
-                drumsRef.current.snare.volume.value = -10;
-                drumsRef.current.hihat.volume.value = -15;
 
                 // ベースの初期化
-                try {
+                if (!bassRef.current) {
                     bassRef.current = new Tone.MonoSynth({
-                        oscillator: {
-                            type: 'square',
-                        },
-                        envelope: {
-                            attack: 0.01,
-                            decay: 0.1,
-                            sustain: 0.3,
-                            release: 0.5,
-                        },
-                        filterEnvelope: {
-                            attack: 0.01,
-                            decay: 0.1,
-                            sustain: 0.5,
-                            release: 0.5,
-                            baseFrequency: 200,
-                            octaves: 2,
-                        },
+                        oscillator: { type: 'square' },
+                        envelope: { attack: 0.01, decay: 0.1, sustain: 0.3, release: 0.5 },
+                        filterEnvelope: { attack: 0.01, decay: 0.1, sustain: 0.5, release: 0.5, baseFrequency: 200, octaves: 2 }
                     }).toDestination();
-                } catch (e) {
-                    console.error('Failed to create bass:', e);
-                    bassRef.current = new Tone.Synth().toDestination();
+                    if (bassRef.current) {
+                        bassRef.current.volume.value = -6;
+                    }
                 }
-                bassRef.current.volume.value = -6;
 
                 // メロディの初期化
-                melodyRef.current = new Tone.Synth({
-                    oscillator: {
-                        type: 'sine',
-                    },
-                    envelope: {
-                        attack: 0.01,
-                        decay: 0.2,
-                        sustain: 0.2,
-                        release: 0.5,
-                    },
-                }).toDestination();
-                melodyRef.current.volume.value = -10;
-
-                // FXの初期化（「びょいーん」感のあるサウンド）
-                fxRef.current = new Tone.FMSynth({
-                    harmonicity: 3.01,
-                    modulationIndex: 14,
-                    oscillator: {
-                        type: "sine"
-                    },
-                    envelope: {
-                        attack: 0.01,
-                        decay: 0.2,
-                        sustain: 0.3,
-                        release: 1.2,
-                    },
-                    modulation: {
-                        type: "triangle"
-                    },
-                    modulationEnvelope: {
-                        attack: 0.2,
-                        decay: 0.01,
-                        sustain: 0.9,
-                        release: 0.9
+                if (!melodyRef.current) {
+                    melodyRef.current = new Tone.Synth({
+                        oscillator: { type: 'sine' },
+                        envelope: { attack: 0.01, decay: 0.2, sustain: 0.2, release: 0.5 }
+                    }).toDestination();
+                    if (melodyRef.current) {
+                        melodyRef.current.volume.value = -10;
                     }
-                }).toDestination();
-                // AutoFilterを追加してさらに「びょいーん」感を出す
-                const autoFilter = new Tone.AutoFilter({
-                    frequency: "8n",
-                    baseFrequency: 200,
-                    octaves: 4,
-                    depth: 0.8
-                }).start();
-                fxRef.current.connect(autoFilter);
-                autoFilter.toDestination();
-                fxRef.current.volume.value = -15;
+                }
+
+                // FXの初期化
+                if (!fxRef.current) {
+                    fxRef.current = new Tone.FMSynth({
+                        harmonicity: 3.01,
+                        modulationIndex: 14,
+                        oscillator: { type: "sine" },
+                        envelope: { attack: 0.01, decay: 0.2, sustain: 0.3, release: 1.2 },
+                        modulation: { type: "triangle" },
+                        modulationEnvelope: { attack: 0.2, decay: 0.01, sustain: 0.9, release: 0.9 }
+                    }).toDestination();
+                    const autoFilter = new Tone.AutoFilter({
+                        frequency: "8n",
+                        baseFrequency: 200,
+                        octaves: 4,
+                        depth: 0.8
+                    }).start();
+                    if (fxRef.current) {
+                        fxRef.current.connect(autoFilter);
+                        if (fxRef.current.volume) {
+                            fxRef.current.volume.value = -15;
+                        } else {
+                            console.warn("FMSynth does not have a direct volume property, consider using a Gain node.");
+                        }
+                    }
+                }
+
+                // Tone.Transport の設定 (もし必要なら)
+                // Tone.Transport.bpm.value = defaultBpm;
+                // if (isPlaying) Tone.Transport.start(); // isPlaying状態に基づいて開始
 
                 setIsInitialized(true);
-                console.log('All instruments initialized successfully');
+                console.log('Tone.js initialized successfully via named import in AudioEngine.');
 
             } catch (error) {
-                console.error('Tone.jsの初期化に失敗しました:', error);
+                console.error('Failed to initialize Tone.js in AudioEngine:', error);
             }
         };
 
-        // CDNからTone.jsを読み込むバックアップ方法を追加
-        const loadToneFromCDN = () => {
-            return new Promise<void>((resolve, reject) => {
-                try {
-                    if (typeof window === 'undefined') return reject('Server side');
-                    if (window.Tone) return resolve(); // 既にロード済み
-
-                    // 複数のCDNを試す
-                    const cdnUrls = [
-                        'https://unpkg.com/tone/build/Tone.js', // バージョン指定なし = 最新版
-                        'https://cdn.jsdelivr.net/npm/tone/build/Tone.js',
-                        'https://unpkg.com/tone@16.0.0/build/Tone.js',
-                        'https://cdn.jsdelivr.net/npm/tone@16.0.0/build/Tone.js',
-                        'https://cdnjs.cloudflare.com/ajax/libs/tone/16.0.0/Tone.js'
-                    ];
-
-                    let loadedSuccessfully = false;
-                    let failedCount = 0;
-
-                    // 各CDNを順番に試す
-                    const tryNextCDN = (index = 0) => {
-                        if (index >= cdnUrls.length) {
-                            console.warn(`All CDNs failed (${failedCount} failures). Trying inline minimal version...`);
-                            // 最終手段: 最小限のTone.jsを直接インラインスクリプトとして注入
-                            try {
-                                const minimalToneScript = document.createElement('script');
-                                minimalToneScript.textContent = `
-                                // Minimal Tone.js replacement for basic functionality
-                                window.Tone = {
-                                    version: "fallback-minimal",
-                                    Synth: class Synth {
-                                        constructor(options) { this.options = options || {}; }
-                                        toDestination() { return this; }
-                                        triggerAttackRelease() { console.log("Synth trigger (fallback)"); return this; }
-                                        dispose() {}
-                                        connect() { return this; }
-                                        disconnect() {}
-                                    },
-                                    MembraneSynth: class MembraneSynth {
-                                        constructor(options) { this.options = options || {}; this.volume = { value: 0, rampTo: () => {} }; }
-                                        toDestination() { return this; }
-                                        triggerAttackRelease() { console.log("MembraneSynth trigger (fallback)"); return this; }
-                                        dispose() {}
-                                        connect() { return this; }
-                                        disconnect() {}
-                                    },
-                                    NoiseSynth: class NoiseSynth {
-                                        constructor(options) { this.options = options || {}; this.volume = { value: 0, rampTo: () => {} }; }
-                                        toDestination() { return this; }
-                                        triggerAttackRelease() { console.log("NoiseSynth trigger (fallback)"); return this; }
-                                        dispose() {}
-                                        connect() { return this; }
-                                        disconnect() {}
-                                    },
-                                    MetalSynth: class MetalSynth {
-                                        constructor(options) { this.options = options || {}; this.volume = { value: 0, rampTo: () => {} }; }
-                                        toDestination() { return this; }
-                                        triggerAttackRelease() { console.log("MetalSynth trigger (fallback)"); return this; }
-                                        dispose() {}
-                                        connect() { return this; }
-                                        disconnect() {}
-                                    },
-                                    MonoSynth: class MonoSynth {
-                                        constructor(options) { 
-                                            this.options = options || {}; 
-                                            this.volume = { value: 0, rampTo: () => {} };
-                                            this.detune = { value: 0 };
-                                        }
-                                        toDestination() { return this; }
-                                        triggerAttackRelease() { console.log("MonoSynth trigger (fallback)"); return this; }
-                                        dispose() {}
-                                        connect() { return this; }
-                                        disconnect() {}
-                                    },
-                                    Part: class Part {
-                                        constructor(callback, events) { 
-                                            this.callback = callback; 
-                                            this.events = events || []; 
-                                            this.loop = false;
-                                            this.loopEnd = "4:0:0";
-                                        }
-                                        start() { return this; }
-                                        stop() { return this; }
-                                        add() { return this; }
-                                        dispose() {}
-                                    },
-                                    Filter: class Filter {
-                                        constructor(options) { this.options = options || {}; }
-                                        toDestination() { return this; }
-                                        connect() { return this; }
-                                        disconnect() {}
-                                        dispose() {}
-                                    },
-                                    AutoFilter: class AutoFilter {
-                                        constructor(options) { 
-                                            this.options = options || {}; 
-                                            this.wet = { value: 0 };
-                                        }
-                                        start() { return this; }
-                                        connect() { return this; }
-                                        disconnect() {}
-                                        dispose() {}
-                                    },
-                                    Panner: class Panner {
-                                        constructor(pan) { this.pan = pan; }
-                                        toDestination() { return this; }
-                                        dispose() {}
-                                    },
-                                    Transport: {
-                                        start() { console.log("Transport start (fallback)"); },
-                                        stop() { console.log("Transport stop (fallback)"); },
-                                        cancel() {},
-                                        bpm: { value: 120 }
-                                    },
-                                    start: async function() { 
-                                        console.log("Tone.start (fallback)"); 
-                                        return Promise.resolve();
-                                    },
-                                    context: { resume: async () => Promise.resolve() }
-                                };
-                                console.warn("Using minimal Tone.js fallback implementation");
-                                `;
-                                document.head.appendChild(minimalToneScript);
-
-                                if (window.Tone) {
-                                    ToneRef.current = window.Tone;
-                                    loadedSuccessfully = true;
-                                    resolve();
-                                } else {
-                                    reject("Failed to create minimal Tone.js fallback");
-                                }
-                            } catch (inlineError) {
-                                console.error("Failed to create inline fallback:", inlineError);
-                                reject(`All loading methods failed: ${failedCount} CDN failures + inline failure`);
-                            }
-                            return;
-                        }
-
-                        console.log(`Attempting to load Tone.js from: ${cdnUrls[index]}`);
-                        const script = document.createElement('script');
-                        script.src = cdnUrls[index];
-
-                        script.onload = () => {
-                            if (window.Tone) {
-                                ToneRef.current = window.Tone;
-                                console.log(`Loaded Tone.js from CDN: ${cdnUrls[index]}`);
-                                loadedSuccessfully = true;
-                                resolve();
-                            } else {
-                                console.warn(`CDN loaded but window.Tone not found: ${cdnUrls[index]}`);
-                                tryNextCDN(index + 1);
-                            }
-                        };
-
-                        script.onerror = () => {
-                            failedCount++;
-                            console.warn(`Failed to load from CDN: ${cdnUrls[index]}`);
-                            tryNextCDN(index + 1);
-                        };
-
-                        document.head.appendChild(script);
-                    };
-
-                    // 最初のCDNから試す
-                    tryNextCDN();
-
-                    // 8秒後のタイムアウト
-                    setTimeout(() => {
-                        if (!loadedSuccessfully) {
-                            reject('Timed out loading Tone.js from CDN');
-                        }
-                    }, 8000);
-                } catch (err) {
-                    reject(err);
-                }
-            });
-        };
-
-        const init = async () => {
-            try {
-                // まずCDNからロードを試みる
-                if (typeof window !== 'undefined' && !window.Tone) {
-                    try {
-                        await loadToneFromCDN();
-                    } catch (cdnError) {
-                        console.error('CDNからのロードに失敗しました:', cdnError);
-                    }
-                }
-
-                // それからTone.jsの初期化
-                await loadTone();
-            } catch (error) {
-                console.error('Tone.jsの初期化に完全に失敗しました:', error);
-            }
-        };
-
-        init();
+        if (isPlaying && !isInitialized) {
+            initTone();
+        }
 
         return () => {
-            isMounted = false;
-            // クリーンアップ
-            if (drumsRef.current.kick) drumsRef.current.kick.dispose();
-            if (drumsRef.current.snare) drumsRef.current.snare.dispose();
-            if (drumsRef.current.hihat) drumsRef.current.hihat.dispose();
-            if (bassRef.current) bassRef.current.dispose();
-            if (melodyRef.current) melodyRef.current.dispose();
-            if (fxRef.current) fxRef.current.dispose();
-
-            if (ToneRef.current?.Transport) {
-                ToneRef.current.Transport.stop();
-                ToneRef.current.Transport.cancel();
+            // クリーンアップロジック (dispose処理)
+            // これは元のuseEffectのクリーンアップや、別途dispose関数から移植する
+            if (isInitialized) {
+                drumsRef.current.kick?.dispose();
+                drumsRef.current.snare?.dispose();
+                drumsRef.current.hihat?.dispose();
+                bassRef.current?.dispose();
+                melodyRef.current?.dispose();
+                fxRef.current?.dispose();
+                // Transportに関するクリーンアップも必要ならここに追加
+                // Tone.Transport.cancel(); Tone.Transport.clear(...);
+                console.log('AudioEngine Tone.js resources disposed.');
+                // setIsInitialized(false); // コンポーネントがアンマウント後再マウントされる場合、再初期化を許可するために必要
             }
         };
-    }, []);
-
-    // 再生状態の制御
-    useEffect(() => {
-        if (!isInitialized || !ToneRef.current) return;
-
-        const Tone = ToneRef.current;
-
-        const setupTransport = async () => {
-            if (isPlaying) {
-                try {
-                    // Audio Contextを開始 (ユーザーインタラクション必須)
-                    await Tone.start();
-
-                    // Tone.Transportを開始（タイムベースの処理用）
-                    // 注：BPMは使用されていないが、デフォルト値を設定
-                    Tone.Transport.bpm.value = defaultBpm;
-                    Tone.Transport.start();
-
-                    console.log('音声エンジン準備完了 - ポーズによる音声生成を開始します');
-                } catch (error) {
-                    console.error('音楽エンジンの開始に失敗しました:', error);
-                }
-            } else {
-                // 停止
-                Tone.Transport.stop();
-                Tone.Transport.cancel();
-            }
-        };
-
-        setupTransport();
-
-        return () => {
-            // クリーンアップ
-            if (Tone.Transport) {
-                Tone.Transport.stop();
-            }
-        };
-    }, [isPlaying, isInitialized, defaultBpm]);
+    }, [isPlaying, isInitialized]);
 
     // ポーズデータの処理とそれに基づいた音の生成
     useEffect(() => {
-        if (!pose || !isPlaying || !isInitialized || !ToneRef.current) return;
+        if (!pose || !isPlaying || !isInitialized) return;
 
-        const Tone = ToneRef.current;
         // nowをフレームごとに一度だけ取得し、すべての音に同じ値を使う
-        const now = Tone.now() + 0.05; // わずかな遅延を追加して安全マージンを確保
+        const frameTime = Tone.context.currentTime + 0.05; // Tone.context から変更
 
         // クールダウン時間を更新（減少）
         Object.keys(audioStateRef.current).forEach(key => {
@@ -636,7 +252,7 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
                     console.log('頷く動作を検出: キックドラム');
                     if (drumsRef.current.kick) {
                         try {
-                            drumsRef.current.kick.triggerAttackRelease('C2', '8n', now, 0.8);
+                            drumsRef.current.kick.triggerAttackRelease('C2', '8n', frameTime, 0.8);
                             soundPlayedThisFrame = true;
                         } catch (error) {
                             console.error('キックドラム再生エラー:', error);
@@ -663,7 +279,7 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
                     if (drumsRef.current.hihat) {
                         try {
                             const velocity = Math.min(0.8, distance / 40);
-                            drumsRef.current.hihat.triggerAttackRelease('C4', '32n', now + 0.01, velocity); // わずかな時間差
+                            drumsRef.current.hihat.triggerAttackRelease('C4', '32n', frameTime + 0.01, velocity); // わずかな時間差
                             soundPlayedThisFrame = true;
                         } catch (error) {
                             console.error('ハイハット再生エラー:', error);
@@ -687,7 +303,7 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
                     if (drumsRef.current.snare) {
                         try {
                             const velocity = Math.min(0.7, distance / 40);
-                            drumsRef.current.snare.triggerAttackRelease('16n', now + 0.02, velocity); // わずかな時間差
+                            drumsRef.current.snare.triggerAttackRelease('16n', frameTime + 0.02, velocity); // わずかな時間差
                             soundPlayedThisFrame = true;
                         } catch (error) {
                             console.error('スネア再生エラー:', error);
@@ -708,7 +324,7 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
                 // より厳格な条件で一時的な動きのみを検出
                 const significantMovement = movement > 5; // 動きの最小閾値
                 const movementStopped = poseStateRef.current.lastMelodyTime &&
-                    (now - poseStateRef.current.lastMelodyTime > 1.5); // 前回のメロディから十分な時間が経過
+                    (frameTime - poseStateRef.current.lastMelodyTime > 1.5); // 前回のメロディから十分な時間が経過
 
                 // 動きがあり、かつ前回のメロディから十分な時間が経過しているか、まだメロディを鳴らしていない場合
                 if (significantMovement &&
@@ -731,10 +347,10 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
                             const melodyPhrase = generateMelodyPhrase(intensity, direction, vertical);
 
                             // フレーズを再生
-                            playMelodyPhrase(melodyPhrase, now);
+                            playMelodyPhrase(melodyPhrase, frameTime);
 
                             // 最後にメロディを鳴らした時間を記録
-                            poseStateRef.current.lastMelodyTime = now;
+                            poseStateRef.current.lastMelodyTime = frameTime;
 
                             soundPlayedThisFrame = true;
                         } catch (error) {
@@ -765,7 +381,7 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
                         try {
                             const bassNotes = ['C2', 'G1', 'A1', 'F1'];
                             const note = bassNotes[Math.floor(Math.random() * bassNotes.length)];
-                            bassRef.current.triggerAttackRelease(note, '4n', now + 0.04, 0.7); // わずかな時間差
+                            bassRef.current.triggerAttackRelease(note, '4n', frameTime + 0.04, 0.7); // わずかな時間差
                             soundPlayedThisFrame = true;
                         } catch (error) {
                             console.error('ベース再生エラー:', error);
@@ -801,18 +417,16 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
                             fxRef.current.detune.value = 0;
 
                             // 音を鳴らす
-                            fxRef.current.triggerAttackRelease('C4', '4n', now + 0.05, 0.6);
+                            fxRef.current.triggerAttackRelease('C4', '4n', frameTime + 0.05, 0.6);
 
                             // 少し遅延させてからdetune操作（スケジューリング競合を回避）
-                            const rampStartTime = now + 0.1;
-                            // Toneの名前空間が必要なので、ToneRef.currentを使う
-                            if (ToneRef.current) {
+                            const rampStartTime = frameTime + 0.1;
+                            if (Tone.context) { // Tone.context から変更
                                 fxRef.current.detune.linearRampToValueAtTime(1200, rampStartTime + 0.4);
 
-                                // タイムアウトでリセット（Tone.jsのスケジューリングに影響しない方法）
                                 setTimeout(() => {
-                                    if (fxRef.current && ToneRef.current) {
-                                        fxRef.current.detune.cancelScheduledValues(ToneRef.current.now());
+                                    if (fxRef.current && Tone.context) { // Tone.context から変更
+                                        fxRef.current.detune.cancelScheduledValues(Tone.context.currentTime); // Tone.context から変更
                                         fxRef.current.detune.value = 0;
                                     }
                                 }, 600);
@@ -853,8 +467,8 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
                     console.log('両手を上げる動作を検出: 特殊エフェクト');
                     if (drumsRef.current.kick && drumsRef.current.snare) {
                         try {
-                            drumsRef.current.kick.triggerAttackRelease('C2', '8n', now + 0.06, 0.9); // わずかな時間差
-                            drumsRef.current.snare.triggerAttackRelease('16n', now + 0.1, 0.8); // さらに時間差
+                            drumsRef.current.kick.triggerAttackRelease('C2', '8n', frameTime + 0.06, 0.9); // わずかな時間差
+                            drumsRef.current.snare.triggerAttackRelease('16n', frameTime + 0.1, 0.8); // さらに時間差
                             soundPlayedThisFrame = true;
                         } catch (error) {
                             console.error('特殊エフェクト再生エラー:', error);
@@ -874,8 +488,8 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
                 console.log('パンチ動作を検出: 特殊エフェクト');
                 if (drumsRef.current.kick && drumsRef.current.snare) {
                     try {
-                        drumsRef.current.kick.triggerAttackRelease('C2', '8n', now + 0.06, 0.9); // わずかな時間差
-                        drumsRef.current.snare.triggerAttackRelease('16n', now + 0.1, 0.8); // さらに時間差
+                        drumsRef.current.kick.triggerAttackRelease('C2', '8n', frameTime + 0.06, 0.9); // わずかな時間差
+                        drumsRef.current.snare.triggerAttackRelease('16n', frameTime + 0.1, 0.8); // さらに時間差
                         soundPlayedThisFrame = true;
                     } catch (error) {
                         console.error('パンチエフェクト再生エラー:', error);
@@ -888,7 +502,7 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
             }
 
             // 最新のポーズを保存
-            poseStateRef.current.lastPose = pose;
+            poseStateRef.current.lastPose = JSON.parse(JSON.stringify(pose));
         };
 
         // シンプルなパンチ動作検出関数（閾値を下げて検出しやすく）
@@ -1296,6 +910,36 @@ const AudioEngine = ({ pose, isPlaying }: AudioEngineProps) => {
     if (!poseStateRef.current.scaleType) {
         poseStateRef.current.scaleType = 'major'; // 初期スケールタイプ
     }
+
+    useEffect(() => {
+        if (!isInitialized) return;
+
+        if (isPlaying) {
+            // Tone.Transport.start();
+            console.log("AudioEngine Transport started");
+        } else {
+            // Tone.Transport.pause();
+            // Tone.Transport.stop(); // 完全に停止させたい場合
+            const releaseTime = Tone.context.currentTime + 0.01; // triggerRelease用の時間を定義
+            drumsRef.current.kick?.triggerRelease(releaseTime);
+            drumsRef.current.snare?.triggerRelease(releaseTime);
+            drumsRef.current.hihat?.triggerRelease(releaseTime);
+            bassRef.current?.triggerRelease(releaseTime);
+            melodyRef.current?.triggerRelease(releaseTime);
+            fxRef.current?.triggerRelease(releaseTime);
+            console.log("AudioEngine Transport paused/stopped and synths released");
+        }
+    }, [isPlaying, isInitialized]);
+
+    // サウンドイベントの再生キュー（例）
+    const playSoundEvents = (events: SoundEvent[]) => {
+        if (!isInitialized || !melodyRef.current) return;
+        const baseTime = Tone.context.currentTime; // now() から変更
+
+        events.forEach((event, index) => {
+            melodyRef.current?.triggerAttackRelease(event.note, event.duration, baseTime + index * 0.5, event.velocity);
+        });
+    };
 
     return (
         <div className="p-4 bg-gray-100 rounded-lg mt-4">

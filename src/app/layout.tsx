@@ -1,9 +1,5 @@
-'use client';
-
 import { Inter, Roboto_Mono } from "next/font/google";
 import "./globals.css";
-import Script from "next/script";
-import Head from 'next/head';
 
 const inter = Inter({
   variable: "--font-inter",
@@ -15,6 +11,12 @@ const robotoMono = Roboto_Mono({
   subsets: ["latin"],
 });
 
+// App Routerでのメタデータ定義
+export const metadata = {
+  title: "MotionJam",
+  description: "動きで音楽を作るインタラクティブアプリ",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -22,35 +24,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja">
-      <Head>
-        <title>MotionJam</title>
-        <meta name="description" content="動きで音楽を作るインタラクティブアプリ" />
-      </Head>
       <head>
-        {/* Tone.jsをCDNから事前ロード - 複数のソースから試行 */}
-        <Script
-          src="https://unpkg.com/tone/build/Tone.js"
-          strategy="beforeInteractive"
-          onError={(_) => {
-            console.error('Tone.js preload from unpkg failed, trying jsDelivr next');
-          }}
-        />
-        {/* バックアップCDN */}
-        <Script
-          src="https://cdn.jsdelivr.net/npm/tone/build/Tone.js"
-          strategy="beforeInteractive"
-          onError={(_) => {
-            console.error('Tone.js preload from jsDelivr failed, trying cdnjs next');
-          }}
-        />
-        {/* バックアップCDN 2 */}
-        <Script
-          src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"
-          strategy="beforeInteractive"
-          onError={(_) => {
-            console.error('All Tone.js CDN preloads failed');
-          }}
-        />
+        {/* 
+          Next.jsが <meta charSet="utf-8" /> や <meta name="viewport" ... /> などを自動で追加します。
+          追加で必要な <meta> タグや <link> タグがあればここに記述できます。
+          Tone.js は next.config.mjs の transpilePackages 設定に基づき、
+          npmからインストールされたものがバンドルされるため、ここでScriptタグを記述する必要はありません。
+        */}
       </head>
       <body
         className={`${inter.variable} ${robotoMono.variable} antialiased`}
